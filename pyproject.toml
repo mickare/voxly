@@ -7,7 +7,7 @@ name = "voxly"
 authors = [{name = "Michael Käser", email = "info@mickare.de"}]
 readme = "README.md"
 license = {file = "LICENSE"}
-keywords = ["voxel", "chunk", "3d", "point", "cloud"]
+keywords = ["voxel", "chunk", "3d", "point-cloud", "library", "numpy-library"]
 classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
