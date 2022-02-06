@@ -1,3 +1,4 @@
+from types import EllipsisType
 from typing import (
     Any,
     Dict,
@@ -5,7 +6,6 @@ from typing import (
     Tuple,
     Iterator,
     Optional,
-    Iterable,
     Sequence,
     Generic,
     TypeVar,
@@ -17,6 +17,7 @@ from typing import (
     overload,
 )
 
+
 import numpy as np
 import numpy.typing as npt
 
@@ -25,13 +26,20 @@ from .typing import Index3, Vec3i
 from .boundary import Box, UnsafeBox
 
 
-T = TypeVar("T")
+_T = TypeVar("_T")
+_VT = TypeVar("_VT")
 # T_co = TypeVar("T_co", covariant=True)
-Index = Tuple[int, int, int]
-IndexUnion = Index | Sequence[int] | npt.NDArray[np.int_]
+IndexUnion = Index3 | Sequence[int] | Vec3i
 
 
-class IndexDict(Generic[T]):
+def _index(item: IndexUnion) -> Index3:
+    item = np.asarray(item, dtype=np.int_)
+    if item.shape != (3,):
+        raise IndexError(f"Invalid index {item}")
+    return tuple(item)  # type: ignore
+
+
+class IndexDict(Generic[_VT]):
     """
     A dictionary that uses 3d integer position tuples as keys.
 
@@ -41,7 +49,7 @@ class IndexDict(Generic[T]):
     __slots__ = ("_data", "_box")
 
     def __init__(self) -> None:
-        self._data: Dict[Index, T] = dict()
+        self._data: Dict[Index3, _VT] = dict()
         self._box: UnsafeBox[int] = UnsafeBox()
 
     def clear(self) -> None:
@@ -49,55 +57,65 @@ class IndexDict(Generic[T]):
         self._box.clear()
 
     def __delitem__(self, key: Any) -> None:
-        index = self.index(key)
+        index = _index(key)
         del self._data[index]
         self._box.mark_dirty()
 
     @overload
-    def pop(self, index: Index3) -> T:
+    def pop(self, index: Index3) -> _VT:
         ...
 
     @overload
-    def pop(self, index: Index3, default: T):
+    def pop(self, index: Index3, default: _VT | _T) -> _VT | _T:
         ...
 
-    def pop(self, index: Index3, default: T_co | None = None) -> T | T_co:
+    def pop(self, index: Index3, default: Any = ...) -> Any:
         l = len(self._data)
-        c = self._data.pop(index, default)
-        if l != len(self._data):
+        _data = self._data
+        idx = _index(index)
+        if default is ...:
+            c = _data.pop(idx)
+        else:
+            c = _data.pop(idx, default)
+        if l != len(_data):
             self._box.mark_dirty()
         return c
 
     @property
     def box(self) -> Box[int]:
-        self._box.to_safe(self._data.keys)
+        return self._box.to_safe(self._data.keys)
 
     def size(self) -> Vec3i:
         if self._data:
-            min, max = np.array(self.box.minmax)
-            return max - min + 1
-        return np.zeros(3, dtype=np.int_)
+            b = self.box
+            return np.array(b.max, dtype=int) - np.array(b.min, dtype=int) + 1  # type: ignore
+        return np.zeros(3, dtype=int)
 
-    @classmethod
-    def index(cls, item: IndexUnion) -> Index:
-        item = np.asarray(item, dtype=np.int_)
-        if item.shape != (3,):
-            raise IndexError(f"Invalid index {item}")
-        return tuple(item)
+    @overload
+    def get(self, index: Index3) -> _VT:
+        ...
 
-    def get(self, index: Index, default=None) -> Optional[T]:
-        return self._data.get(self.index(index), default)
+    @overload
+    def get(self, index: Index3, default: _VT | _T) -> _VT | _T:
+        ...
 
-    def __getitem_from_numpy(self, item: npt.NDArray[np.int_], ignore_empty=True) -> Union[T, List[T]]:
+    def get(self, index: Index3, default: Any = ...) -> Any:
+        if default is ...:
+            return self._data.get(_index(index), default)
+        else:
+            return self._data.get(_index(index))
+
+    def __getitem_from_numpy(self, item: npt.NDArray[np.int_], ignore_empty: bool = True) -> _VT | List[_VT]:
         item = np.asarray(item, dtype=np.int_)
         if item.shape == (3,):
-            return self._data[tuple(item)]
+            return self._data[_index(item)]
         else:
             assert item.ndim == 2 and item.shape[1] == 3
+            _data = self._data
             if ignore_empty:
-                return [d for d in (self._data.get(tuple(i), None) for i in item) if d is not None]
+                return [_data[index] for index in (_index(i) for i in item) if index in _data]
             else:
-                return [self._data[tuple(i)] for i in item]
+                return [_data[_index(i)] for i in item]
 
     def sliced_iterator(self, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None) -> VoxelGridIterator:
         if not self._data:
@@ -105,82 +123,92 @@ class IndexDict(Generic[T]):
         k_min, k_max = np.array(self.box.minmax)
         return VoxelGridIterator(low=k_min, high=k_max + 1, x=x, y=y, z=z)
 
-    def sliced(self, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None, ignore_empty=True) -> Iterator[T]:
-        if not self._data:
+    def sliced(
+        self, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None, ignore_empty: bool = True
+    ) -> Iterator[_VT]:
+        _data = self._data
+        if not _data:
             return
         if x is None and y is None and z is None:
-            yield from self._data.values()
+            yield from _data.values()
         else:
             it = self.sliced_iterator(x, y, z)
             if ignore_empty:
                 for key in it:
-                    if key in self._data:
-                        yield self._data[key]
+                    try:
+                        yield _data[key]
+                    except KeyError:
+                        pass  # ignored
             else:
                 for key in it:
-                    yield self._data.get(key)
+                    yield _data[key]
 
-    def __getitem__(self, item: Union[IndexUnion, slice, Tuple[slice, ...]]) -> Union[T, List[T]]:
+    @overload
+    def __getitem__(self, item: IndexUnion) -> _VT: ...
+    @overload
+    def __getitem__(self, item: Tuple[slice, slice, slice]) -> List[_VT]: ...
+
+    def __getitem__(self, item: IndexUnion | Tuple[slice, slice, slice]) -> _VT | List[_VT]:
         if isinstance(item, slice):
             return list(self.sliced(item))
         if isinstance(item, tuple):
-            try:
-                index = np.asarray(item, dtype=np.int_)
-                if index.shape == (3,):
-                    return self._data[self.index(item)]
-                raise KeyError(f"invalid key {item}")
-            except TypeError:
-                pass
             if 0 < len(item) <= 3 and any(isinstance(i, slice) for i in item):
                 return list(self.sliced(*item))
+            else:
+                try:
+                    index: npt.NDArray[np.int_] = np.asarray(item, dtype=np.int_)
+                    if index.shape == (3,):
+                        return self._data[_index(item)]
+                    raise KeyError(f"invalid key {item}")
+                except TypeError:
+                    pass
             raise KeyError(f"invalid key {item}")
         elif isinstance(item, (list, np.ndarray)):
             return self.__getitem_from_numpy(np.array(item, dtype=int))
         else:
             raise KeyError(f"invalid key {item}")
 
-    def insert(self, index: Index, value: T):
-        index = self.index(index)
+    def insert(self, index: Index3, value: _VT) -> None:
+        index = _index(index)
         self._data[index] = value
-        self._box.add(index)
+        self._box.mark_dirty()
 
-    def __setitem__(self, key: Index, value: T):
+    def __setitem__(self, key: Index3, value: _VT) -> None:
         self.insert(key, value)
 
-    def __contains__(self, item: Index) -> bool:
-        return self.index(item) in self._data
+    def __contains__(self, item: Index3) -> bool:
+        return _index(item) in self._data
 
-    def setdefault(self, index: Index, default: T) -> T:
-        index = self.index(index)
-        c: T | None = self._data.get(index, None)
-        if c is None:
-            self._data[index] = default
-            self._box.add(index)
-            return default
-        return c
-
-    def create_if_absent(self, index: Index, factory: Callable[[Index], T], *, insert=True) -> T:
-        index = self.index(index)
+    def setdefault(self, index: Index3, default: _VT) -> None:
+        index = _index(index)
         _data = self._data
-        c: T | None = _data.get(index, None)
-        if c is None:
+        if index not in _data:
+            self._data[index] = default
+            self._box.mark_dirty()
+
+    def create_if_absent(self, index: Index3, factory: Callable[[Index3], _VT], *, insert: bool = True) -> _VT:
+        index = _index(index)
+        _data = self._data
+        try:
+            return _data[index]
+        except KeyError:
             c = factory(index)
             if insert:
                 _data[index] = c
-                self._box.add(index)
-        return c
+                self._box.mark_dirty()
+            return c
 
     def __len__(self) -> int:
         return len(self._data)
 
-    def items(self) -> ItemsView[Index, T]:
+    def items(self) -> ItemsView[Index3, _VT]:
         return self._data.items()
 
-    def keys(self) -> KeysView[Index]:
+    def keys(self) -> KeysView[Index3]:
         return self._data.keys()
 
-    def values(self) -> ValuesView[T]:
+    def values(self) -> ValuesView[_VT]:
         return self._data.values()
 
-    def __iter__(self) -> Iterator[T]:
+    def __iter__(self) -> Iterator[_VT]:
         return iter(self._data.values())
