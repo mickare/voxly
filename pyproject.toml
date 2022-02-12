@@ -45,6 +45,7 @@ doc = ["sphinx"]
 
 
 [tool.mypy]
+plugins = "numpy.typing.mypy_plugin"
 # --strict
 disallow_any_generics = true
 disallow_subclassing_any = true

@@ -100,14 +100,14 @@ class VoxelGridIterator:
         assert x.start is not None and x.stop is not None
         assert y.start is not None and y.stop is not None
         assert z.start is not None and z.stop is not None
-        return cls((x.start, y.start, z.start), (x.stop, y.stop, z.stop), x, y, z)  # type: ignore
-
+        return cls((x.start, y.start, z.start), (x.stop, y.stop, z.stop), x, y, z)
+        
     @classmethod
     def empty(cls) -> "VoxelGridIterator":
         return cls(np.zeros(3), np.zeros(3), 0, 0, 0)  # type: ignore
 
     def __init__(
-        self, low: Vec3i, high: Vec3i, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None, clip: bool = True
+        self, low: Vec3i | Index3, high: Vec3i | Index3, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None, clip: bool = True
     ):
         self._low: Vec3i = np.asarray(low, dtype=int)
         self._high: Vec3i = np.asarray(high, dtype=int)

@@ -21,11 +21,16 @@ _OT = TypeVar("_OT", bound=np.generic)
 class ChunkGrid(Generic[_VT]):
     __slots__ = ("_chunk_size", "_dtype", "_fill_value", "chunks")
 
-    def __init__(self, chunk_size: int, dtype: np.dtype[_VT] = None, fill_value: _VT = None):
+    def __init__(self, chunk_size: int, dtype: np.dtype[_VT] = None, default: _VT | None = None) -> None:
         assert chunk_size > 0
+        
+        # try to deduct the dtype
+        if dtype is None and default is not ...:
+            dtype = np.dtype(type(default))
+
         self._chunk_size = chunk_size
-        self._dtype = np.dtype(dtype)
-        self._fill_value = self._dtype.base.type(fill_value)  # If this fails, dtype is an unsupported complex type
+        self._dtype: np.dtype[Any] = np.dtype(object if dtype is None else dtype)
+        self._fill_value: _VT = self._dtype.type() if default is ... else self._dtype.type(default)  # type: ignore
         self.chunks: IndexDict[Chunk[_VT]] = IndexDict()
 
     @property
