@@ -1,4 +1,7 @@
-from ast import Index
+"""
+Module that contains the ChunkGrid class
+"""
+
 import functools
 import operator
 from typing import (

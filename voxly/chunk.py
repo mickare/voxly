@@ -1,3 +1,7 @@
+"""
+Module that contains the Chunk class
+"""
+
 import functools
 import operator
 from typing import (

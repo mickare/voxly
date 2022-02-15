@@ -1,11 +1,15 @@
-from types import EllipsisType
+"""
+Module that contains the index based hash map based on tuples.
+
+A python tuple is immutable and hashable.
+We can't use numpy arrays as index because they are mutable and not hashable.
+"""
+
 from typing import (
     Any,
     Dict,
-    Union,
     Tuple,
     Iterator,
-    Optional,
     Sequence,
     Generic,
     TypeVar,
@@ -23,7 +27,7 @@ import numpy.typing as npt
 
 from .iterators import SliceOpt, VoxelGridIterator
 from .typing import Index3, Arr3i
-from .boundary import Box, UnsafeBox
+from .bounding import BoundingBox, UnsafeBoundingBox
 
 
 _T = TypeVar("_T")
@@ -33,6 +37,7 @@ IndexUnion = Index3 | Sequence[int] | Arr3i
 
 
 def _index(item: IndexUnion) -> Index3:
+    """Convert any index type to a tuple index"""
     item = np.asarray(item, dtype=np.int_)
     if item.shape != (3,):
         raise IndexError(f"Invalid index {item}")
@@ -50,23 +55,27 @@ class IndexDict(Generic[_VT]):
 
     def __init__(self) -> None:
         self._data: Dict[Index3, _VT] = dict()
-        self._box: UnsafeBox[int] = UnsafeBox()
+        self._box: UnsafeBoundingBox[int] = UnsafeBoundingBox(dtype=np.int_)
 
     def clear(self) -> None:
+        """Clear all elements"""
         self._data.clear()
         self._box.clear()
 
     def __delitem__(self, key: Any) -> None:
+        """Delete an item by index"""
         index = _index(key)
         del self._data[index]
         self._box.mark_dirty()
 
     @overload
     def pop(self, index: IndexUnion) -> _VT:
+        """Get and delete an item by index"""
         ...
 
     @overload
     def pop(self, index: IndexUnion, default: _VT | _T) -> _VT | _T:
+        """Get and delete an item by index, or return the default argument"""
         ...
 
     def pop(self, index: IndexUnion, default: Any = ...) -> Any:
@@ -82,10 +91,12 @@ class IndexDict(Generic[_VT]):
         return c
 
     @property
-    def box(self) -> Box[int]:
+    def box(self) -> BoundingBox[int]:
+        """Bounding box"""
         return self._box.to_safe(self._data.keys)
 
     def size(self) -> Arr3i:
+        """Size of the bounding box"""
         if self._data:
             b = self.box
             return np.array(b.max, dtype=int) - np.array(b.min, dtype=int) + 1  # type: ignore
@@ -93,10 +104,12 @@ class IndexDict(Generic[_VT]):
 
     @overload
     def get(self, index: IndexUnion) -> _VT | None:
+        """Get an item by index"""
         ...
 
     @overload
     def get(self, index: IndexUnion, default: _VT | _T | None) -> _VT | _T | None:
+        """Get an item by index, or return the default argument"""
         ...
 
     def get(self, index: IndexUnion, default: _VT | _T | None = None) -> _VT | _T | None:  # type: ignore
@@ -115,6 +128,7 @@ class IndexDict(Generic[_VT]):
                 return [_data[_index(i)] for i in item]
 
     def sliced_iterator(self, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None) -> VoxelGridIterator:
+        """Iterate over all positions in the bounding box"""
         if not self._data:
             return VoxelGridIterator.empty()
         k_min, k_max = np.array(self.box.minmax)
