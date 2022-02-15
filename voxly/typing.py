@@ -3,9 +3,9 @@ from typing import Any, Protocol, Tuple, TypeVar, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
-Vec3i = npt.NDArray[np.int_]
-
+Arr3i = npt.NDArray[np.int_]
 Index3 = Tuple[int, int, int]
+Vec3i = Arr3i | Index3
 
 
 class BoolType(Protocol):
@@ -13,50 +13,37 @@ class BoolType(Protocol):
         ...
 
 
-_T_co = TypeVar("_T_co", contravariant=True)
+_T_contra = TypeVar("_T_contra", contravariant=True)
 
 
 @runtime_checkable
 class LenType(Protocol):
-    __slots__ = ()
-
     @abstractmethod
     def __len__(self) -> int:
         ...
 
 
-class SupportsDunderLT(Protocol[_T_co]):
-    __slots__ = ()
-
+class SupportsDunderLT(Protocol):
     @abstractmethod
-    def __lt__(self, __rhs: _T_co) -> Any:
+    def __lt__(self, __rhs: Any) -> bool:
         ...
 
 
-class SupportsDunderGT(Protocol[_T_co]):
-    __slots__ = ()
-
+class SupportsDunderGT(Protocol):
     @abstractmethod
-    def __gt__(self, __rhs: _T_co) -> Any:
+    def __gt__(self, __rhs: Any) -> bool:
         ...
-
-
-SupportsRichComparison = SupportsDunderLT | SupportsDunderGT
 
 
 @runtime_checkable
-class SupportsDunderMul(Protocol[_T_co]):
-    __slots__ = ()
-
+class SupportsDunderMul(Protocol[_T_contra]):
     @abstractmethod
-    def __mul__(self, __rhs: _T_co) -> Any:
+    def __mul__(self, __rhs: _T_contra) -> Any:
         ...
 
 
 @runtime_checkable
 class NumpyDTypeProperty(Protocol):
-    __slots__ = ()
-
     @property
     @abstractmethod
     def dtype(self) -> np.dtype[Any]:

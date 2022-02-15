@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Union, Sequence, Iterator
 import numpy as np
 import numpy.typing as npt
 
-from .typing import Index3, Vec3i
+from .typing import Index3, Arr3i
 
 
 # Static face directions
@@ -38,7 +38,7 @@ class ChunkFace(enum.IntEnum):
     EAST = 4  # +Z
     WEST = 5  # -Z
 
-    def direction(self) -> Vec3i:
+    def direction(self) -> Arr3i:
         return CHUNK_DIRECTIONS[self]  # type: ignore
 
     def _flip(self) -> int:
@@ -100,5 +100,5 @@ class ChunkFace(enum.IntEnum):
         return (s0 if u else s1, s0 if v else s1, s0 if w else s1)
 
     @classmethod
-    def corner_direction(cls, x: "ChunkFace", y: "ChunkFace", z: "ChunkFace") -> Vec3i:
+    def corner_direction(cls, x: "ChunkFace", y: "ChunkFace", z: "ChunkFace") -> Arr3i:
         return x.direction() + y.direction() + z.direction()

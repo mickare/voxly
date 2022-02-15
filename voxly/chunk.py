@@ -16,7 +16,7 @@ from typing import (
 import numpy as np
 import numpy.typing as npt
 
-from .typing import Index3, SupportsDunderMul, Vec3i
+from .typing import Index3, SupportsDunderMul, Arr3i, Vec3i
 
 
 class ChunkHelper:
@@ -59,7 +59,7 @@ class ChunkHelper:
 
     @staticmethod
     def clip_index_slice(
-        low: Vec3i, high: Vec3i, idx: Tuple[int | slice, ...]
+        low: Arr3i, high: Arr3i, idx: Tuple[int | slice, ...]
     ) -> Tuple[bool, None | npt.NDArray[np.int_]]:
         assert 0 < len(idx) <= 3
         xss = ChunkHelper._ensure_slice(low[0], high[0], idx[0])
@@ -133,11 +133,11 @@ class Chunk(Generic[_VT_co]):
         return self._array
 
     @property
-    def position_low(self) -> Vec3i:
+    def position_low(self) -> Arr3i:
         return np.array(self._index, dtype=np.int_) * self._size  # type: ignore
 
     @property
-    def position_high(self) -> Vec3i:
+    def position_high(self) -> Arr3i:
         return self.position_low + self._size
 
     def is_filled(self) -> bool:
@@ -152,7 +152,7 @@ class Chunk(Generic[_VT_co]):
     def is_array(self) -> bool:
         return self._array is not None
 
-    def index_inner(self, pos: Vec3i) -> Vec3i:
+    def index_inner(self, pos: Vec3i) -> Arr3i:
         return np.asarray(pos, dtype=np.int_) % self._size
 
     def to_array(self) -> npt.NDArray[_VT_co]:
@@ -196,9 +196,11 @@ class Chunk(Generic[_VT_co]):
 
     def _ensure_dtype(self, value: _VT_co | Any) -> _VT_co:
         _dtype = self._dtype
-        if np.can_cast(value, _dtype):
-            return value
-        return self._dtype.type(value)  # type: ignore
+        if _dtype.subdtype:
+            # Hacky way to ensure the data type matches
+            return np.array((value,), _dtype)[0]  # type: ignore
+        else:
+            return _dtype.base.type(value)  # type: ignore
 
     def set_fill(self, value: _VT_co | Any) -> None:
         # Need to ensure that the fill field is the dtype.
@@ -249,23 +251,37 @@ class Chunk(Generic[_VT_co]):
                 c.set_array(self.to_array())
         return c
 
-    def filter(self, mask: "Chunk[np.bool8]") -> "Chunk[_VT_co]":
-        _mask: Chunk[np.bool8] = mask.astype(np.bool8)
-        c = self.copy(empty=True)
-        if _mask.is_filled():
-            if _mask.fill:
-                if self.is_filled():
-                    c.set_fill(self.fill)
-                else:
-                    c.set_array(self.array)
-        else:
-            arr = c.to_array()
-            _mask_arr = _mask.array
-            arr[_mask_arr] = self.to_array()[_mask_arr]
-            c.set_array(arr)
-        return c
+    def split(self, splits: int, chunk_size: int | None = None) -> Iterator["Chunk[_VT_co]"]:
+        splits = int(splits)
+        assert splits > 0 and self._size % splits == 0
+        split_size = self._size // splits
 
-    def items(
+        # New chunk size
+        chunk_size = int(chunk_size or self._size)
+        assert chunk_size > 0
+
+        dtype = self._dtype
+
+        # Voxel repeats to achieve chunk size
+        repeats = chunk_size / split_size
+        assert repeats > 0 and repeats % 1 == 0  # Chunk size must be achieved by duplication of voxels
+        repeats = int(repeats)
+
+        for offset in ChunkHelper.iter_grid(splits):
+            new_index = np.add(self._index * splits, offset)
+            c: "Chunk[_VT_co]" = Chunk(new_index, size=chunk_size, dtype=dtype, fill=self._fill)
+            _self_array = self._array
+            if _self_array is not None:
+                u, v, w = np.asarray(offset, dtype=np.int_) * split_size
+                tmp = _self_array[u : u + split_size, v : v + split_size, w : w + split_size]
+                if repeats == 1:
+                    val = tmp.copy()
+                else:
+                    val = np.repeat(np.repeat(np.repeat(tmp, repeats, axis=0), repeats, axis=1), repeats, axis=2)
+                c.set_array(val)
+            yield c
+
+    def items_tuple(
         self, mask: "Chunk[np.bool8]" | npt.NDArray[np.bool8] | None = None
     ) -> Tuple[npt.NDArray[np.int_], npt.NDArray[_VT_co]]:
         """
@@ -288,6 +304,25 @@ class Chunk(Generic[_VT_co]):
             return cps, np.full((len(cps),), self._fill, dtype=self._dtype)
         else:
             return cps, _array[tuple(grid.T)]
+
+    def items(self, mask: "Chunk[np.bool8]" | npt.NDArray[np.bool8] | None = None) -> Iterator[Tuple[Arr3i, _VT_co]]:
+        yield from zip(*self.items_tuple(mask))
+
+    def filter(self, mask: "Chunk[np.bool8]") -> "Chunk[_VT_co]":
+        _mask: Chunk[np.bool8] = mask.astype(np.bool8)
+        c = self.copy(empty=True)
+        if _mask.is_filled():
+            if _mask.fill:
+                if self.is_filled():
+                    c.set_fill(self.fill)
+                else:
+                    c.set_array(self.array)
+        else:
+            arr = c.to_array()
+            _mask_arr = _mask.array
+            arr[_mask_arr] = self.to_array()[_mask_arr]
+            c.set_array(arr)
+        return c
 
     def _argwhere(self) -> npt.NDArray[np.int_]:
         _array = self._array
@@ -318,21 +353,25 @@ class Chunk(Generic[_VT_co]):
         ...
 
     @overload
-    def __getitem__(self, item: Sequence[Index3]) -> npt.NDArray[_VT_co]:
+    def __getitem__(self, item: Sequence[Vec3i]) -> npt.NDArray[_VT_co]:
         ...
 
     @overload
     def __getitem__(self, item: npt.NDArray[np.int_]) -> npt.NDArray[_VT_co]:
         ...
 
-    def __getitem__(self, item: Index3 | npt.ArrayLike) -> Any:
+    def __getitem__(self, item: Vec3i | Sequence[Vec3i] | npt.ArrayLike) -> Any:
         if isinstance(item, Chunk):
             return self.filter(item)
         return self.to_array()[item]
 
     def __setitem__(
         self,
-        key: npt.NDArray[np.int_] | "Chunk[np.bool8]" | Tuple[int | slice, int | slice, int | slice],
+        key: "Chunk[np.bool8]"
+        | Vec3i
+        | Sequence[Vec3i]
+        | npt.NDArray[np.int_]
+        | Tuple[int | slice, int | slice, int | slice],
         value: _VT_co | npt.NDArray[_VT_co] | "Chunk[_VT_co]",
     ) -> None:
 
@@ -408,76 +447,19 @@ class Chunk(Generic[_VT_co]):
                 _self_array[_index] = value
             self.set_array(_self_array)
 
-    def split(self, splits: int, chunk_size: int | None = None) -> Iterator["Chunk[_VT_co]"]:
-        splits = int(splits)
-        assert splits > 0 and self._size % splits == 0
-        split_size = self._size // splits
-
-        # New chunk size
-        chunk_size = int(chunk_size or self._size)
-        assert chunk_size > 0
-
-        dtype = self._dtype
-
-        # Voxel repeats to achieve chunk size
-        repeats = chunk_size / split_size
-        assert repeats > 0 and repeats % 1 == 0  # Chunk size must be achieved by duplication of voxels
-        repeats = int(repeats)
-
-        for offset in ChunkHelper.iter_grid(splits):
-            new_index = np.add(self._index * splits, offset)
-            c: "Chunk[_VT_co]" = Chunk(new_index, size=chunk_size, dtype=dtype, fill=self._fill)
-            _self_array = self._array
-            if _self_array is not None:
-                u, v, w = np.asarray(offset, dtype=np.int_) * split_size
-                tmp = _self_array[u : u + split_size, v : v + split_size, w : w + split_size]
-                if repeats == 1:
-                    val = tmp.copy()
-                else:
-                    val = np.repeat(np.repeat(np.repeat(tmp, repeats, axis=0), repeats, axis=1), repeats, axis=2)
-                c.set_array(val)
-            yield c
-
-    def convert(
-        self,
-        dtype: Type[_OT_co] | np.dtype[_OT_co],
-        func: Callable[[Any], _OT_co],
-        func_vec: Callable[[npt.NDArray[_VT_co]], npt.NDArray[_OT_co]] | None = None,
-    ) -> "Chunk[_OT_co]":
-        c: "Chunk[_OT_co]" = Chunk(self._index, self._size, dtype, fill=func(self._fill))
-        _array = self._array
-        if _array is None:
-            c.set_fill(func(self.fill))
-        else:
-            func_vec = func_vec or np.vectorize(func)
-            c.set_array(func_vec(_array))
-        return c
-
-    # @overload
-    # def apply(
+    # def convert(
     #     self,
-    #     func: Callable[[npt.NDArray[_VT_co] | _VT_co], npt.NDArray[_OT_co] | _OT_co],
-    #     dtype: Type[_OT_co] | npt.DTypeLike = None,
+    #     dtype: Type[_OT_co] | np.dtype[_OT_co],
+    #     func: Callable[[Any], _OT_co],
+    #     func_vec: Callable[[npt.NDArray[_VT_co]], npt.NDArray[_OT_co]] | None = None,
     # ) -> "Chunk[_OT_co]":
-    #     ...
-
-    # @overload
-    # def apply(
-    #     self,
-    #     func: Callable[[npt.NDArray[_VT_co] | _VT_co], npt.NDArray[_VT_co] | _VT_co],
-    #     dtype: Type[_VT_co] | npt.DTypeLike = None,
-    #     inplace: Literal[True] = True,
-    # ) -> "Chunk[_VT_co]":
-    #     ...
-
-    # @overload
-    # def apply(
-    #     self,
-    #     func: Callable[[npt.NDArray[_VT_co] | _VT_co], npt.NDArray[_OT_co] | _OT_co],
-    #     dtype: Type[_OT_co] | npt.DTypeLike = None,
-    #     inplace: Literal[False] = False,
-    # ) -> "Chunk[_OT_co]":
-    #     ...
+    #     _fill = func(self._fill)
+    #     c: "Chunk[_OT_co]" = Chunk(self._index, self._size, dtype, fill=_fill)
+    #     _array = self._array
+    #     if _array is not None:
+    #         func_vec = func_vec or np.vectorize(func)
+    #         c.set_array(func_vec(_array))
+    #     return c
 
     def apply(
         self,
@@ -492,11 +474,11 @@ class Chunk(Generic[_VT_co]):
                 _dtype: np.dtype[_OT_co] = np.asarray(_fill).dtype
             else:
                 _dtype = np.dtype(dtype)  # type: ignore
-            c = self.astype(dtype=_dtype, copy=True)
+            c: "Chunk[_OT_co]" = Chunk(self._index, self._size, _dtype, fill=_fill)
         else:
             c = into
+            c.set_fill(_fill)
 
-        c.set_fill(_fill)
         _array = self._array
         if _array is not None:
             c.set_array(func(_array))
@@ -723,19 +705,15 @@ class Chunk(Generic[_VT_co]):
         ...
 
     @overload
-    def sum(self, dtype: Type[_OT_co]) -> _OT_co:
+    def sum(self, dtype: Type[_OT_co] | np.dtype[_OT_co]) -> _OT_co:
         ...
 
-    @overload
-    def sum(self, dtype: npt.DTypeLike) -> Any:
-        ...
-
-    def sum(self, dtype: Type[_OT_co] | npt.DTypeLike = None) -> _VT_co | _OT_co | Any:
+    def sum(self, dtype: Type[_OT_co] | npt.DTypeLike = None) -> Any:
         _dtype = self._dtype if dtype is None else np.dtype(dtype)
         _array = self._array
         if _array is None:
             assert isinstance(self._fill, SupportsDunderMul)
-            return self._fill * (self._size**3)
+            return _dtype.type(self._fill) * (self._size**3)
         else:
             return np.sum(_array, dtype=_dtype)
 
@@ -763,3 +741,18 @@ class Chunk(Generic[_VT_co]):
     #         arr = np.array([c.to_array() for c in chunks], dtype=_dtype.base).transpose((1, 2, 3, 0))
     #         new_chunk.set_array(arr)
     #     return new_chunk
+
+
+def stack_chunks(chunks: Sequence["Chunk[_VT_co]"], dtype: np.dtype[_VT_co]) -> "Chunk[_VT_co]":
+    _dtype = np.dtype(dtype)
+    assert _dtype.shape == (len(chunks),)
+    index = chunks[0]._index
+    size = chunks[0]._size
+
+    _fill: npt.NDArray[_VT_co] = np.array([c._fill for c in chunks], _dtype)
+    new_chunk: "Chunk[_VT_co]" = Chunk(index, size, _dtype, _fill)
+
+    if any(c.is_array() for c in chunks):
+        arr = np.array([c.to_array() for c in chunks], dtype=_dtype.base).transpose((1, 2, 3, 0))
+        new_chunk.set_array(arr)
+    return new_chunk

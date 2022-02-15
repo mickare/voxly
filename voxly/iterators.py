@@ -3,7 +3,7 @@ from typing import Any, Protocol, TypeVar, Union, Tuple, Iterator, Optional, Ite
 import numpy as np
 import numpy.typing as npt
 
-from .typing import Vec3i, Index3
+from .typing import Arr3i, Index3, Vec3i
 
 SliceOpt = Union[int, slice, None]
 
@@ -109,15 +109,15 @@ class VoxelGridIterator:
     def __init__(
         self, low: Vec3i | Index3, high: Vec3i | Index3, x: SliceOpt = None, y: SliceOpt = None, z: SliceOpt = None, clip: bool = True
     ):
-        self._low: Vec3i = np.asarray(low, dtype=int)
-        self._high: Vec3i = np.asarray(high, dtype=int)
+        self._low: Arr3i = np.asarray(low, dtype=int)
+        self._high: Arr3i = np.asarray(high, dtype=int)
         assert self._low.shape == (3,) and self._high.shape == (3,)
         self._x = SlicedRangeIterator(self._low[0], self._high[0], x, clip)
         self._y = SlicedRangeIterator(self._low[1], self._high[1], y, clip)
         self._z = SlicedRangeIterator(self._low[2], self._high[2], z, clip)
         self.clip = clip
 
-    def __contains__(self, item: Vec3i) -> bool:
+    def __contains__(self, item: Arr3i) -> bool:
         if len(item) == 3:
             return item[0] in self._x and item[1] in self._y and item[2] in self._z
         return False
@@ -145,11 +145,11 @@ class VoxelGridIterator:
         return len(self._x), len(self._y), len(self._z)
 
     @property
-    def low(self) -> Vec3i:
+    def low(self) -> Arr3i:
         return self._low
 
     @property
-    def high(self) -> Vec3i:
+    def high(self) -> Arr3i:
         return self._high
 
     @property
@@ -165,15 +165,15 @@ class VoxelGridIterator:
         return self._z
 
     @property
-    def start(self) -> Vec3i:
+    def start(self) -> Arr3i:
         return np.asarray((self._x.start, self._y.start, self._z.start), dtype=int)
 
     @property
-    def stop(self) -> Vec3i:
+    def stop(self) -> Arr3i:
         return np.asarray((self._x.stop, self._y.stop, self._z.stop), dtype=int)
 
     @property
-    def step(self) -> Vec3i:
+    def step(self) -> Arr3i:
         return np.asarray((self._x.step, self._y.step, self._z.step), dtype=int)
 
     def __floordiv__(self, other: int) -> "VoxelGridIterator":

@@ -22,14 +22,14 @@ import numpy as np
 import numpy.typing as npt
 
 from .iterators import SliceOpt, VoxelGridIterator
-from .typing import Index3, Vec3i
+from .typing import Index3, Arr3i
 from .boundary import Box, UnsafeBox
 
 
 _T = TypeVar("_T")
 _VT = TypeVar("_VT")
 # T_co = TypeVar("T_co", covariant=True)
-IndexUnion = Index3 | Sequence[int] | Vec3i
+IndexUnion = Index3 | Sequence[int] | Arr3i
 
 
 def _index(item: IndexUnion) -> Index3:
@@ -62,14 +62,14 @@ class IndexDict(Generic[_VT]):
         self._box.mark_dirty()
 
     @overload
-    def pop(self, index: Index3) -> _VT:
+    def pop(self, index: IndexUnion) -> _VT:
         ...
 
     @overload
-    def pop(self, index: Index3, default: _VT | _T) -> _VT | _T:
+    def pop(self, index: IndexUnion, default: _VT | _T) -> _VT | _T:
         ...
 
-    def pop(self, index: Index3, default: Any = ...) -> Any:
+    def pop(self, index: IndexUnion, default: Any = ...) -> Any:
         l = len(self._data)
         _data = self._data
         idx = _index(index)
@@ -85,25 +85,22 @@ class IndexDict(Generic[_VT]):
     def box(self) -> Box[int]:
         return self._box.to_safe(self._data.keys)
 
-    def size(self) -> Vec3i:
+    def size(self) -> Arr3i:
         if self._data:
             b = self.box
             return np.array(b.max, dtype=int) - np.array(b.min, dtype=int) + 1  # type: ignore
         return np.zeros(3, dtype=int)
 
     @overload
-    def get(self, index: Index3) -> _VT:
+    def get(self, index: IndexUnion) -> _VT | None:
         ...
 
     @overload
-    def get(self, index: Index3, default: _VT | _T) -> _VT | _T:
+    def get(self, index: IndexUnion, default: _VT | _T | None) -> _VT | _T | None:
         ...
 
-    def get(self, index: Index3, default: Any = ...) -> Any:
-        if default is ...:
-            return self._data.get(_index(index), default)
-        else:
-            return self._data.get(_index(index))
+    def get(self, index: IndexUnion, default: _VT | _T | None = None) -> _VT | _T | None:  # type: ignore
+        return self._data.get(_index(index), default)
 
     def __getitem_from_numpy(self, item: npt.NDArray[np.int_], ignore_empty: bool = True) -> _VT | List[_VT]:
         item = np.asarray(item, dtype=np.int_)
@@ -144,9 +141,12 @@ class IndexDict(Generic[_VT]):
                     yield _data[key]
 
     @overload
-    def __getitem__(self, item: IndexUnion) -> _VT: ...
+    def __getitem__(self, item: IndexUnion) -> _VT:
+        ...
+
     @overload
-    def __getitem__(self, item: Tuple[slice, slice, slice]) -> List[_VT]: ...
+    def __getitem__(self, item: Tuple[slice, slice, slice]) -> List[_VT]:
+        ...
 
     def __getitem__(self, item: IndexUnion | Tuple[slice, slice, slice]) -> _VT | List[_VT]:
         if isinstance(item, slice):
@@ -168,33 +168,33 @@ class IndexDict(Generic[_VT]):
         else:
             raise KeyError(f"invalid key {item}")
 
-    def insert(self, index: Index3, value: _VT) -> None:
-        index = _index(index)
-        self._data[index] = value
+    def insert(self, index: IndexUnion, value: _VT) -> None:
+        idx = _index(index)
+        self._data[idx] = value
         self._box.mark_dirty()
 
-    def __setitem__(self, key: Index3, value: _VT) -> None:
+    def __setitem__(self, key: IndexUnion, value: _VT) -> None:
         self.insert(key, value)
 
-    def __contains__(self, item: Index3) -> bool:
+    def __contains__(self, item: IndexUnion) -> bool:
         return _index(item) in self._data
 
-    def setdefault(self, index: Index3, default: _VT) -> None:
-        index = _index(index)
+    def setdefault(self, index: IndexUnion, default: _VT) -> None:
+        idx = _index(index)
         _data = self._data
-        if index not in _data:
-            self._data[index] = default
+        if idx not in _data:
+            self._data[idx] = default
             self._box.mark_dirty()
 
-    def create_if_absent(self, index: Index3, factory: Callable[[Index3], _VT], *, insert: bool = True) -> _VT:
-        index = _index(index)
+    def create_if_absent(self, index: IndexUnion, factory: Callable[[Index3], _VT], *, insert: bool = True) -> _VT:
+        idx = _index(index)
         _data = self._data
         try:
-            return _data[index]
+            return _data[idx]
         except KeyError:
-            c = factory(index)
+            c = factory(idx)
             if insert:
-                _data[index] = c
+                _data[idx] = c
                 self._box.mark_dirty()
             return c
 
